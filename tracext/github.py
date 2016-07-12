@@ -205,10 +205,12 @@ class GitHubPostCommitHook(GitHubMixin, Component):
             req.send(msg.encode('utf-8'), 'text/plain', 405)
 
         event = req.get_header('X-GitHub-Event')
+        if not event:
+            event = req.get_header('X-Event-Key')
         if event == 'ping':
             payload = json.loads(req.read())
             req.send(payload['zen'].encode('utf-8'), 'text/plain', 200)
-        elif event != 'push':
+        elif event != 'push' and event != 'repo:push':
             msg = u'Only ping and push are supported\n'
             self.log.warning(msg.rstrip('\n'))
             req.send(msg.encode('utf-8'), 'text/plain', 400)
@@ -226,14 +228,25 @@ class GitHubPostCommitHook(GitHubMixin, Component):
         output += u'* Synchronizing with clone\n'
         repos.sync()
 
-        try:
-            payload = json.loads(req.read())
-            revs = [commit['id']
-                    for commit in payload['commits'] if commit['distinct']]
-        except (ValueError, KeyError):
-            msg = u'Invalid payload\n'
-            self.log.warning(msg.rstrip('\n'))
-            req.send(msg.encode('utf-8'), 'text/plain', 400)
+        if event == 'push':
+            try:
+                payload = json.loads(req.read())
+                revs = [commit['id']
+                        for commit in payload['commits'] if commit['distinct']]
+            except (ValueError, KeyError):
+                msg = u'Invalid payload\n'
+                self.log.warning(msg.rstrip('\n'))
+                req.send(msg.encode('utf-8'), 'text/plain', 400)
+        else:
+            try:
+                payload = json.loads(req.read())
+                bitpayload = payload['push']['changes'][0]
+                revs = [commit['hash']
+                        for commit in bitpayload['commits']]
+            except (ValueError, KeyError):
+                msg = u'Invalid payload\n'
+                self.log.warning(msg.rstrip('\n'))
+                req.send(msg.encode('utf-8'), 'text/plain', 400)
 
         branches = self.get_branches(reponame)
         added, skipped, unknown = classify_commits(revs, repos, branches)
