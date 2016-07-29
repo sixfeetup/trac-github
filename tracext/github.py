@@ -241,8 +241,13 @@ class GitHubPostCommitHook(GitHubMixin, Component):
             try:
                 payload = json.loads(req.read())
                 bitpayload = payload['push']['changes'][0]
-                revs = [commit['hash']
-                        for commit in bitpayload['commits']]
+                revs = []
+                for commit in bitpayload['commits']:
+                    revs.append(commit['hash'])
+                    changeset = repos.get_changeset(commit['hash'])
+                    if len(changeset.get_branches()) > 1:
+                        req.send('Changeset is now on more than one branch',
+                                 'text/plain', 202)
             except (ValueError, KeyError):
                 msg = u'Invalid payload\n'
                 self.log.warning(msg.rstrip('\n'))
