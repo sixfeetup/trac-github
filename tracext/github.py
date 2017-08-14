@@ -204,13 +204,13 @@ class GitHubPostCommitHook(GitHubMixin, Component):
             self.log.warning(u'Method not allowed (%s)' % req.method)
             req.send(msg.encode('utf-8'), 'text/plain', 405)
 
-        event = req.get_header('X-GitHub-Event')
-        if not event:
-            event = req.get_header('X-Event-Key')
+        event = req.get_header('X-GitHub-Event') or \
+            req.get_header('X-Event-Key') or \
+            req.get_header('X-Gitlab-Event')
         if event == 'ping':
             payload = json.loads(req.read())
             req.send(payload['zen'].encode('utf-8'), 'text/plain', 200)
-        elif event != 'push' and event != 'repo:push':
+        elif event != 'push' and event != 'repo:push' and event != 'Push Hook':
             msg = u'Only ping and push are supported\n'
             self.log.warning(msg.rstrip('\n'))
             req.send(msg.encode('utf-8'), 'text/plain', 400)
@@ -229,6 +229,7 @@ class GitHubPostCommitHook(GitHubMixin, Component):
         repos.sync()
 
         if event == 'push':
+            # GitHub
             try:
                 payload = json.loads(req.read())
                 revs = [commit['id']
@@ -237,7 +238,8 @@ class GitHubPostCommitHook(GitHubMixin, Component):
                 msg = u'Invalid payload\n'
                 self.log.warning(msg.rstrip('\n'))
                 req.send(msg.encode('utf-8'), 'text/plain', 400)
-        else:
+        elif event == 'repo:push':
+            # BitBucket
             try:
                 payload = json.loads(req.read())
                 bitpayload = payload['push']['changes'][0]
@@ -245,6 +247,21 @@ class GitHubPostCommitHook(GitHubMixin, Component):
                 for commit in bitpayload['commits']:
                     revs.append(commit['hash'])
                     changeset = repos.get_changeset(commit['hash'])
+                    if len(changeset.get_branches()) > 1:
+                        req.send('Changeset is now on more than one branch',
+                                 'text/plain', 202)
+            except (ValueError, KeyError):
+                msg = u'Invalid payload\n'
+                self.log.warning(msg.rstrip('\n'))
+                req.send(msg.encode('utf-8'), 'text/plain', 400)
+        elif event == 'Push Hook':
+            # GitLab
+            try:
+                payload = json.loads(req.read())
+                revs = []
+                for commit in payload['commits']:
+                    revs.append(commit['id'])
+                    changeset = repos.get_changeset(commit['id'])
                     if len(changeset.get_branches()) > 1:
                         req.send('Changeset is now on more than one branch',
                                  'text/plain', 202)
